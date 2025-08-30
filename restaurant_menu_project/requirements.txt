@@ -1,0 +1,5 @@
+# Python requirements for restaurant menu generator
+openpyxl
+pandas
+pillow
+reportlab

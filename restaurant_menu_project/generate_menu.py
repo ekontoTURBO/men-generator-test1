@@ -1,20 +1,17 @@
 import os
 import sys
 import pandas as pd
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.colors import HexColor
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.lib.utils import ImageReader
+from PIL import Image, ImageDraw, ImageFont
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
-print("Script started (after imports)")
+TELEGRAM_TOKEN = "8283708069:AAE-a2JilzOQkvVlkTivA5HFxVmwo4PDRFc"
 
 # Constants
 DATA_FILE = 'menu_data.xlsx'
-BG_FILE = 'menu_background.png'
+BG_FILE = os.path.join('restaurant_menu_project', 'menu_background.png')
 FONT_FILE = os.path.join('fonts', 'Argent.ttf')
-OUTPUT_FILE = 'menu_output.pdf'
+OUTPUT_FILE = 'menu_output.png'
 CATEGORY_COLOR = '#aa8600'
 CATEGORY_SIZE = 25
 NAME_SIZE = 17
@@ -92,52 +89,41 @@ def parse_command(command, available_dishes):
     return requested, None
 
 
-def register_fonts():
+def get_font(size):
     if not os.path.exists(FONT_FILE):
         print(f"Bot: Error! Font '{FONT_FILE}' not found in {os.getcwd()}.")
         print("Please make sure Argent.ttf exists in the 'fonts' folder and is a valid TTF font.")
         sys.exit(1)
-    try:
-        pdfmetrics.registerFont(TTFont(CATEGORY_FONT, FONT_FILE, subfontIndex=0, uni=True))
-    except TypeError:
-        try:
-            pdfmetrics.registerFont(TTFont(CATEGORY_FONT, FONT_FILE))
-        except Exception as e:
-            print(f"Bot: Error registering font '{FONT_FILE}': {e}")
-            print("Make sure the font is a valid TrueType TTF file, not OTF/CFF.")
-            sys.exit(1)
+    return ImageFont.truetype(FONT_FILE, size)
 
 
 
-# --- New generate_pdf using layout system ---
-def generate_pdf(df, selected_dishes):
-    c = canvas.Canvas(OUTPUT_FILE, pagesize=(LAYOUT["page"]["w"], LAYOUT["page"]["h"]))
-    width, height = LAYOUT["page"]["w"], LAYOUT["page"]["h"]
-    # Draw background
+
+# --- New generate_png using Pillow ---
+def generate_png(df, selected_dishes):
+    width, height = int(LAYOUT["page"]["w"]), int(LAYOUT["page"]["h"])
+    # Create base image
     if os.path.exists(BG_FILE):
-        bg = ImageReader(BG_FILE)
-        c.drawImage(bg, 0, 0, width=width, height=height)
+        bg = Image.open(BG_FILE).convert("RGBA")
+        bg = bg.resize((width, height))
+        img = bg.copy()
     else:
-        print(f"Bot: Warning! Background '{BG_FILE}' not found.")
+        img = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+    draw = ImageDraw.Draw(img)
 
-
-    from reportlab.pdfbase.pdfmetrics import stringWidth
     content_x = LAYOUT["content"]["x"]
     content_w = LAYOUT["content"]["w"]
 
-    def draw_centered_unicode(c, x, y, text, font, size):
+    def draw_centered_unicode(draw, x, y, text, font, fill):
         text = str(text)
-        text_width = stringWidth(text, font, size)
+        bbox = font.getbbox(text)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
         draw_x = x + (content_w - text_width) / 2
-        text_obj = c.beginText()
-        text_obj.setTextOrigin(draw_x, y)
-        text_obj.setFont(font, size)
-        text_obj.textLine(text)
-        c.drawText(text_obj)
+        draw.text((draw_x, y), text, font=font, fill=fill)
 
     # Find dish rows in the order entered
     dish_rows = [df[df['Name'] == dish].iloc[0] for dish in selected_dishes]
-    # Group by category, preserving order
     from collections import OrderedDict
     category_to_dishes = OrderedDict()
     for row in dish_rows:
@@ -146,7 +132,7 @@ def generate_pdf(df, selected_dishes):
             category_to_dishes[cat] = []
         category_to_dishes[cat].append(row)
 
-    # --- Calculate total height needed for menu ---
+    # Calculate total height needed for menu
     total_height = 0
     for cat, dishes in category_to_dishes.items():
         total_height += LAYOUT["spacing"]["title_break_after"]
@@ -158,9 +144,12 @@ def generate_pdf(df, selected_dishes):
             words = desc_text.split()
             lines = []
             line = ""
+            font = get_font(LAYOUT["typography"]["desc"]["size"])
             for word in words:
                 test_line = line + (" " if line else "") + word
-                if stringWidth(test_line, LAYOUT["typography"]["desc"]["font"], LAYOUT["typography"]["desc"]["size"]) > max_width:
+                bbox = font.getbbox(test_line)
+                test_width = bbox[2] - bbox[0]
+                if test_width > max_width:
                     if line:
                         lines.append(line)
                     line = word
@@ -172,7 +161,7 @@ def generate_pdf(df, selected_dishes):
             total_height += LAYOUT["spacing"]["dish_gap"]
         total_height += LAYOUT["spacing"]["category_gap"]
 
-    # --- Determine starting y_top for vertical alignment ---
+    # Determine starting y_top for vertical alignment
     if LAYOUT.get("vertical_align") == "middle":
         content_h = LAYOUT["content"]["h"]
         top_margin = LAYOUT["content"]["y_top"]
@@ -185,40 +174,34 @@ def generate_pdf(df, selected_dishes):
 
     for cat, dishes in category_to_dishes.items():
         # Category Title
-        title_font = LAYOUT["typography"]["title"]["font"]
-        title_size = LAYOUT["typography"]["title"]["size"]
+        title_font = get_font(LAYOUT["typography"]["title"]["size"])
         title_color = LAYOUT["typography"]["title"]["color"]
-        c.setFillColor(HexColor(title_color))
-        y_rl = top_to_rl_y(y_top)
-        draw_centered_unicode(c, content_x, y_rl, cat, title_font, title_size)
-        print(f"Bot: Adding category: {cat}")
+        y_draw = y_top
+        draw_centered_unicode(draw, content_x, y_draw, cat, title_font, title_color)
         y_top += LAYOUT["spacing"]["title_break_after"] + LAYOUT["spacing"].get("title_line", 28)
 
         for row in dishes:
             # Dish Name
-            name_font = LAYOUT["typography"]["name"]["font"]
-            name_size = LAYOUT["typography"]["name"]["size"]
+            name_font = get_font(LAYOUT["typography"]["name"]["size"])
             name_color = LAYOUT["typography"]["name"]["color"]
-            c.setFillColor(HexColor(name_color))
             name_text = str(row['Name'])
-            y_rl = top_to_rl_y(y_top)
-            draw_centered_unicode(c, content_x, y_rl, name_text, name_font, name_size)
-            print(f"Bot: Adding dish: {row['Name']}")
+            y_draw = y_top
+            draw_centered_unicode(draw, content_x, y_draw, name_text, name_font, name_color)
             y_top += LAYOUT["spacing"]["name_line"]
 
             # Description (wrap if needed)
-            desc_font = LAYOUT["typography"]["desc"]["font"]
-            desc_size = LAYOUT["typography"]["desc"]["size"]
+            desc_font = get_font(LAYOUT["typography"]["desc"]["size"])
             desc_color = LAYOUT["typography"]["desc"]["color"]
-            c.setFillColor(HexColor(desc_color))
             desc_text = str(row['Description'])
-            max_width = LAYOUT["max_width"] - 40  # indent for description
+            max_width = LAYOUT["max_width"] - 40
             words = desc_text.split()
             lines = []
             line = ""
             for word in words:
                 test_line = line + (" " if line else "") + word
-                if stringWidth(test_line, desc_font, desc_size) > max_width:
+                bbox = desc_font.getbbox(test_line)
+                test_width = bbox[2] - bbox[0]
+                if test_width > max_width:
                     if line:
                         lines.append(line)
                     line = word
@@ -227,46 +210,45 @@ def generate_pdf(df, selected_dishes):
             if line:
                 lines.append(line)
             for desc_line in lines:
-                y_rl = top_to_rl_y(y_top)
-                draw_centered_unicode(c, content_x, y_rl, desc_line, desc_font, desc_size)
-                print(f"Bot: Adding description: {desc_line}")
+                y_draw = y_top
+                draw_centered_unicode(draw, content_x, y_draw, desc_line, desc_font, desc_color)
                 y_top += LAYOUT["typography"]["desc_line_height"]
 
             y_top += LAYOUT["spacing"]["dish_gap"]
 
         y_top += LAYOUT["spacing"]["category_gap"]
 
-    c.save()
+    img.save(OUTPUT_FILE)
     print(f"Bot: Menu ready! Saved as {OUTPUT_FILE}")
 
 
-def main():
-    print("Welcome to MenuBot 📝")
-    print("Type your request like in Telegram:")
-    print("Example: /menu Rosół, Schabowy, Sernik\n")
-    print("[DEBUG] Loading data...")
-    df = load_data()
-    print("[DEBUG] Data loaded. Available dishes:", list(df['Name']))
-    available_dishes = list(df['Name'])
-    print("[DEBUG] Registering fonts...")
-    register_fonts()
-    print("[DEBUG] Fonts registered. Entering command loop.")
-    try:
-        while True:
-            print("[DEBUG] Waiting for user input...")
-            command = input("You: ")
-            print(f"[DEBUG] Command entered: {command}")
-            selected_dishes, error = parse_command(command, available_dishes)
-            print(f"[DEBUG] Selected dishes: {selected_dishes}, Error: {error}")
-            if error:
-                print(error)
-                continue
-            print(f"Bot: Got it! Generating menu with dishes: {', '.join(selected_dishes)}")
-            generate_pdf(df, selected_dishes)
-            break
-    except Exception as e:
-        print(f"[DEBUG] Exception in main loop: {e}")
 
-if __name__ == '__main__':
-    print("About to run main()")
+# --- Telegram Bot Handlers ---
+async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    df = load_data()
+    available_dishes = list(df['Name'])
+    command = update.message.text
+    selected_dishes, error = parse_command(command, available_dishes)
+    if error:
+        await update.message.reply_text(error)
+        return
+    await update.message.reply_text(f"Bot: Got it! Generating menu with dishes: {', '.join(selected_dishes)}")
+    generate_png(df, selected_dishes)
+    # Send PNG file
+    with open(OUTPUT_FILE, "rb") as png_file:
+        await update.message.reply_photo(png_file, filename=OUTPUT_FILE)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Welcome to MenuBot 📝\nSend /menu followed by dish names separated by commas.\nExample: /menu Rosół, Schabowy, Sernik"
+    )
+
+def main():
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.Regex(r"^/menu.*"), menu_command))
+    print("Bot is running...")
+    app.run_polling()
+
+if __name__ == "__main__":
     main()
