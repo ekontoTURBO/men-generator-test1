@@ -1,0 +1,16 @@
+# Python specific ignores
+venv/                 # Ignores the virtual environment folder
+*.pyc                 # Ignores compiled Python files
+__pycache__/          # Ignores Python's cache directories
+.Python               # A common virtual env name sometimes
+
+# IDE specific ignores (if you're using VS Code)
+.vscode/              # Ignore VS Code settings (optional, sometimes you want to share these)
+
+# Generated files
+menu_output.pdf       # Ignore generated PDF files
+menu_output.png       # Ignore generated PNG files
+
+# Operating System specific ignores
+.DS_Store             # macOS specific files
+Thumbs.db             # Windows specific files
