@@ -43,10 +43,10 @@ LAYOUT = {
     },
     "spacing": {
         "title_break_after": 8,
-        "name_line": 15,
-        "desc_line": 8,
+        "name_line": 25,
+        "desc_line": 15,
         "dish_gap": 10,
-        "category_gap": 14,
+        "category_gap": 10,
         "first_baseline_y_top": 110
     },
     "max_width": 371.25,
@@ -101,18 +101,25 @@ def get_font(size):
 
 # --- New generate_png using Pillow ---
 def generate_png(df, selected_dishes):
-    width, height = int(LAYOUT["page"]["w"]), int(LAYOUT["page"]["h"])
-    # Create base image
+    # Use background image size for output
     if os.path.exists(BG_FILE):
         bg = Image.open(BG_FILE).convert("RGBA")
-        bg = bg.resize((width, height))
+        width, height = bg.size
         img = bg.copy()
     else:
+        width, height = int(LAYOUT["page"]["w"]), int(LAYOUT["page"]["h"])
         img = Image.new("RGBA", (width, height), (255, 255, 255, 255))
     draw = ImageDraw.Draw(img)
 
-    content_x = LAYOUT["content"]["x"]
-    content_w = LAYOUT["content"]["w"]
+    # Scale layout to match background size
+    layout_scale_x = width / LAYOUT["page"]["w"]
+    layout_scale_y = height / LAYOUT["page"]["h"]
+    content_x = int(LAYOUT["content"]["x"] * layout_scale_x)
+    content_w = int(LAYOUT["content"]["w"] * layout_scale_x)
+
+    # Scale font sizes and spacing
+    def get_scaled_font(size):
+        return get_font(int(size * layout_scale_y))
 
     def draw_centered_unicode(draw, x, y, text, font, fill):
         text = str(text)
@@ -134,22 +141,28 @@ def generate_png(df, selected_dishes):
 
     # Calculate total height needed for menu
     total_height = 0
+    scaled_title_break_after = LAYOUT["spacing"]["title_break_after"] * layout_scale_y
+    scaled_title_line = LAYOUT["spacing"].get("title_line", 28) * layout_scale_y
+    scaled_name_line = LAYOUT["spacing"]["name_line"] * layout_scale_y
+    scaled_desc_line_height = LAYOUT["typography"]["desc_line_height"] * layout_scale_y
+    scaled_dish_gap = LAYOUT["spacing"]["dish_gap"] * layout_scale_y
+    scaled_category_gap = LAYOUT["spacing"]["category_gap"] * layout_scale_y
+    scaled_max_width = (LAYOUT["max_width"] - 40) * layout_scale_x
     for cat, dishes in category_to_dishes.items():
-        total_height += LAYOUT["spacing"]["title_break_after"]
-        total_height += LAYOUT["spacing"].get("title_line", 28)
+        total_height += scaled_title_break_after
+        total_height += scaled_title_line
         for row in dishes:
-            total_height += LAYOUT["spacing"]["name_line"]
+            total_height += scaled_name_line
             desc_text = str(row['Description'])
-            max_width = LAYOUT["max_width"] - 40
             words = desc_text.split()
             lines = []
             line = ""
-            font = get_font(LAYOUT["typography"]["desc"]["size"])
+            font = get_scaled_font(LAYOUT["typography"]["desc"]["size"])
             for word in words:
                 test_line = line + (" " if line else "") + word
                 bbox = font.getbbox(test_line)
                 test_width = bbox[2] - bbox[0]
-                if test_width > max_width:
+                if test_width > scaled_max_width:
                     if line:
                         lines.append(line)
                     line = word
@@ -157,43 +170,42 @@ def generate_png(df, selected_dishes):
                     line = test_line
             if line:
                 lines.append(line)
-            total_height += len(lines) * LAYOUT["typography"]["desc_line_height"]
-            total_height += LAYOUT["spacing"]["dish_gap"]
-        total_height += LAYOUT["spacing"]["category_gap"]
+            total_height += len(lines) * scaled_desc_line_height
+            total_height += scaled_dish_gap
+        total_height += scaled_category_gap
 
     # Determine starting y_top for vertical alignment
     if LAYOUT.get("vertical_align") == "middle":
-        content_h = LAYOUT["content"]["h"]
-        top_margin = LAYOUT["content"]["y_top"]
+        content_h = LAYOUT["content"]["h"] * layout_scale_y
+        top_margin = LAYOUT["content"]["y_top"] * layout_scale_y
         if LAYOUT.get("middle_y") is not None:
-            y_top = max(top_margin, LAYOUT["middle_y"] - total_height / 2)
+            y_top = max(top_margin, LAYOUT["middle_y"] * layout_scale_y - total_height / 2)
         else:
             y_top = top_margin + max(0, (content_h - total_height) / 2)
     else:
-        y_top = LAYOUT["spacing"]["first_baseline_y_top"]
+        y_top = LAYOUT["spacing"]["first_baseline_y_top"] * layout_scale_y
 
     for cat, dishes in category_to_dishes.items():
         # Category Title
-        title_font = get_font(LAYOUT["typography"]["title"]["size"])
+        title_font = get_scaled_font(LAYOUT["typography"]["title"]["size"])
         title_color = LAYOUT["typography"]["title"]["color"]
         y_draw = y_top
         draw_centered_unicode(draw, content_x, y_draw, cat, title_font, title_color)
-        y_top += LAYOUT["spacing"]["title_break_after"] + LAYOUT["spacing"].get("title_line", 28)
+        y_top += scaled_title_break_after + scaled_title_line
 
         for row in dishes:
             # Dish Name
-            name_font = get_font(LAYOUT["typography"]["name"]["size"])
+            name_font = get_scaled_font(LAYOUT["typography"]["name"]["size"])
             name_color = LAYOUT["typography"]["name"]["color"]
             name_text = str(row['Name'])
             y_draw = y_top
             draw_centered_unicode(draw, content_x, y_draw, name_text, name_font, name_color)
-            y_top += LAYOUT["spacing"]["name_line"]
+            y_top += scaled_name_line
 
             # Description (wrap if needed)
-            desc_font = get_font(LAYOUT["typography"]["desc"]["size"])
+            desc_font = get_scaled_font(LAYOUT["typography"]["desc"]["size"])
             desc_color = LAYOUT["typography"]["desc"]["color"]
             desc_text = str(row['Description'])
-            max_width = LAYOUT["max_width"] - 40
             words = desc_text.split()
             lines = []
             line = ""
@@ -201,7 +213,7 @@ def generate_png(df, selected_dishes):
                 test_line = line + (" " if line else "") + word
                 bbox = desc_font.getbbox(test_line)
                 test_width = bbox[2] - bbox[0]
-                if test_width > max_width:
+                if test_width > scaled_max_width:
                     if line:
                         lines.append(line)
                     line = word
@@ -212,14 +224,15 @@ def generate_png(df, selected_dishes):
             for desc_line in lines:
                 y_draw = y_top
                 draw_centered_unicode(draw, content_x, y_draw, desc_line, desc_font, desc_color)
-                y_top += LAYOUT["typography"]["desc_line_height"]
+                y_top += scaled_desc_line_height
 
-            y_top += LAYOUT["spacing"]["dish_gap"]
+            y_top += scaled_dish_gap
 
-        y_top += LAYOUT["spacing"]["category_gap"]
+        y_top += scaled_category_gap
 
-    img.save(OUTPUT_FILE)
-    print(f"Bot: Menu ready! Saved as {OUTPUT_FILE}")
+    # Save as PNG with maximum quality, no compression loss
+    img.save(OUTPUT_FILE, format="PNG", optimize=True)
+    print(f"Bot: Menu ready! Saved as {OUTPUT_FILE} (PNG, max quality)")
 
 
 
