@@ -12,6 +12,8 @@ This project generates a print-ready restaurant menu PDF from an Excel file, usi
 - All text is centered and formatted according to print-safe rules
 - Dishes are grouped by category, with category titles shown once above their dishes
 - Top margin and content start position are easily adjustable
+- Supports vertical centering of menu content (set `vertical_align` to `"middle"` in `LAYOUT`)
+- If `vertical_align` is set to `"top"`, the menu starts at `first_baseline_y_top` (distance from top edge)
 
 ## Setup
 1. **Install Python 3.10+**
@@ -40,11 +42,14 @@ This project generates a print-ready restaurant menu PDF from an Excel file, usi
 ## Customizing Layout
 - To change margins, content area, or typography, edit the `LAYOUT` dictionary in `generate_menu.py`.
 - To move the menu content closer to the top, lower the values for `"top_band"`, `"y_top"`, and `"first_baseline_y_top"` in `LAYOUT`.
+- To center the menu vertically, set `"vertical_align": "middle"` in `LAYOUT`. The menu will be centered within the content area, respecting the top margin (`y_top`).
+- To start the menu at a specific position from the top, set `"vertical_align": "top"` and adjust `"first_baseline_y_top"`.
 - Example:
   ```python
   "margins": {"L": 24, "R": 24, "B": 24, "top_band": 20},
   "content": {"x": 24, "y_top": 20, "w": 371.25, "h": 555.5},
   "spacing": {"first_baseline_y_top": 40, ...}
+  "vertical_align": "middle"
   ```
 
 ## What is this project for?

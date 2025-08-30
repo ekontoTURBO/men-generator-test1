@@ -34,7 +34,7 @@ LAYOUT = {
     "margins": {"L": 24, "R": 24, "B": 24, "top_band": 20},
     "content": {
         "x": 24,
-        "y_top": 20,
+        "y_top": 50,
         "w": 371.25,
         "h": 555.5
     },
@@ -52,7 +52,9 @@ LAYOUT = {
         "category_gap": 14,
         "first_baseline_y_top": 110
     },
-    "max_width": 371.25
+    "max_width": 371.25,
+    "vertical_align": "middle",  # can be "top" or "middle"
+    "middle_y": None  # if set, overrides automatic centering
 }
 
 def top_to_rl_y(y_top):
@@ -118,10 +120,6 @@ def generate_pdf(df, selected_dishes):
     else:
         print(f"Bot: Warning! Background '{BG_FILE}' not found.")
 
-    # Start at first title baseline (top-left coordinates)
-    y_top = LAYOUT["spacing"]["first_baseline_y_top"]
-
-
 
     from reportlab.pdfbase.pdfmetrics import stringWidth
     content_x = LAYOUT["content"]["x"]
@@ -131,7 +129,6 @@ def generate_pdf(df, selected_dishes):
         text = str(text)
         text_width = stringWidth(text, font, size)
         draw_x = x + (content_w - text_width) / 2
-        # Use TextObject for Unicode
         text_obj = c.beginText()
         text_obj.setTextOrigin(draw_x, y)
         text_obj.setFont(font, size)
@@ -149,6 +146,43 @@ def generate_pdf(df, selected_dishes):
             category_to_dishes[cat] = []
         category_to_dishes[cat].append(row)
 
+    # --- Calculate total height needed for menu ---
+    total_height = 0
+    for cat, dishes in category_to_dishes.items():
+        total_height += LAYOUT["spacing"]["title_break_after"]
+        total_height += LAYOUT["spacing"].get("title_line", 28)
+        for row in dishes:
+            total_height += LAYOUT["spacing"]["name_line"]
+            desc_text = str(row['Description'])
+            max_width = LAYOUT["max_width"] - 40
+            words = desc_text.split()
+            lines = []
+            line = ""
+            for word in words:
+                test_line = line + (" " if line else "") + word
+                if stringWidth(test_line, LAYOUT["typography"]["desc"]["font"], LAYOUT["typography"]["desc"]["size"]) > max_width:
+                    if line:
+                        lines.append(line)
+                    line = word
+                else:
+                    line = test_line
+            if line:
+                lines.append(line)
+            total_height += len(lines) * LAYOUT["typography"]["desc_line_height"]
+            total_height += LAYOUT["spacing"]["dish_gap"]
+        total_height += LAYOUT["spacing"]["category_gap"]
+
+    # --- Determine starting y_top for vertical alignment ---
+    if LAYOUT.get("vertical_align") == "middle":
+        content_h = LAYOUT["content"]["h"]
+        top_margin = LAYOUT["content"]["y_top"]
+        if LAYOUT.get("middle_y") is not None:
+            y_top = max(top_margin, LAYOUT["middle_y"] - total_height / 2)
+        else:
+            y_top = top_margin + max(0, (content_h - total_height) / 2)
+    else:
+        y_top = LAYOUT["spacing"]["first_baseline_y_top"]
+
     for cat, dishes in category_to_dishes.items():
         # Category Title
         title_font = LAYOUT["typography"]["title"]["font"]
@@ -158,7 +192,7 @@ def generate_pdf(df, selected_dishes):
         y_rl = top_to_rl_y(y_top)
         draw_centered_unicode(c, content_x, y_rl, cat, title_font, title_size)
         print(f"Bot: Adding category: {cat}")
-        y_top += LAYOUT["spacing"]["title_break_after"] + LAYOUT["spacing"]["title_line"] if "title_line" in LAYOUT["spacing"] else 28
+        y_top += LAYOUT["spacing"]["title_break_after"] + LAYOUT["spacing"].get("title_line", 28)
 
         for row in dishes:
             # Dish Name
